@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block title %}Templates{% endblock %}
+
+{% block content %}
+  <h2>Templates</h2>
+  <a href="{% url 'template_create' %}">Create New Template</a>
+  <ul>
+    {% for template in object_list %}
+      <li>
+        {{ template.name }}
+        <a href="{% url 'template_update' template.pk %}">Edit</a>
+        <a href="{% url 'template_delete' template.pk %}">Delete</a>
+      </li>
+    {% endfor %}
+  </ul>
+{% endblock %}
