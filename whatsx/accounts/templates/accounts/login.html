@@ -1,0 +1,71 @@
+{% extends 'accounts/base.html' %}
+{% load static %}
+{% block title %}Login | WhatsX{% endblock %}
+
+{% block content %}
+<style>
+  .wa-card {
+    border-radius: 18px;
+    box-shadow: 0 4px 24px rgba(16,185,129,0.10);
+    background: #fff;
+    padding: 2.5rem 2rem;
+    margin-top: 48px;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .wa-btn {
+    background: #25d366;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-weight: 500;
+    padding: 0.75rem 0;
+    transition: all 0.2s;
+  }
+  .wa-btn:hover {
+    background: #128c7e;
+    transform: scale(1.02);
+  }
+  .wa-link { color: #128c7e; text-decoration: none; }
+  .wa-link:hover { text-decoration: underline; }
+</style>
+
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-12">
+            <div class="wa-card">
+                <div class="text-center mb-4">
+                    <img src="{% static 'image/WHATSBOTX.png' %}" alt="WhatsX Logo" style="height: 150px; width: auto;">
+                    <h3 class="mt-2 mb-0" style="color:#25d366; font-family:'Playfair Display',serif; font-weight:700;">Login to <span style="color:#ff9800;">WhatsX</span></h3>
+                </div>
+
+                {% if form.errors %}
+                  <div class="alert alert-danger" role="alert">
+                      Invalid username or password. Please try again.
+                  </div>
+                {% endif %}
+
+                <form method="post" action="{% url 'accounts:login_view' %}">
+                    {% csrf_token %}
+                    <div class="form-floating mb-3">
+                        {{ form.username }}
+                        <label for="{{ form.username.id_for_label }}">Username</label>
+                    </div>
+                    <div class="form-floating mb-3">
+                        {{ form.password }}
+                        <label for="{{ form.password.id_for_label }}">Password</label>
+                    </div>
+                    <button type="submit" class="wa-btn w-100">Login</button>
+                </form>
+
+                <div class="mt-4 text-center">
+                    {# **THE FIX IS HERE:** Added 'accounts:' to the register_view URL #}
+                    <a href="{% url 'accounts:register_view' %}" class="wa-link">Don't have an account? Register</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

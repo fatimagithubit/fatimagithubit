@@ -1,110 +1,112 @@
-import csv
-from io import TextIOWrapper
+import csv, io, re, json, requests
 from django.shortcuts import render, redirect
-from django.urls import reverse_lazy
-from django.views.generic import ListView, CreateView, UpdateView, DeleteView, FormView
-from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from .models import Template, Contact, Message
-from .forms import CustomUserCreationForm
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.utils import timezone
+from django.db import transaction, models
+from django.http import JsonResponse
+from .models import Campaign, CampaignRecipient, MessageTemplate
+from accounts.models import Contact
+from .tasks import send_campaign_messages
 
-class SignUpView(CreateView):
-    form_class = CustomUserCreationForm
-    success_url = reverse_lazy('login')
-    template_name = 'registration/signup.html'
+@login_required
+def whatsapp_connect_view(request):
+    return render(request, 'messaging/whatsapp_connect.html')
 
-class TemplateListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
-    model = Template
-    template_name = 'messaging/template_list.html'
+def make_node_request(method, endpoint):
+    node_url = f"http://127.0.0.1:3001/{endpoint}"
+    try:
+        if method.lower() == 'post': response = requests.post(node_url, timeout=20)
+        else: response = requests.get(node_url, timeout=10)
+        response.raise_for_status()
+        return JsonResponse(response.json())
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({'status': 'ERROR', 'message': f'WhatsApp service connection failed: {e}'}, status=503)
 
-    def test_func(self):
-        return self.request.user.user_type == 'admin'
+@login_required
+def start_session_api(request): return make_node_request('post', 'start')
+@login_required
+def status_api(request): return make_node_request('get', 'status')
+@login_required
+def disconnect_api(request): return make_node_request('post', 'disconnect')
 
-class MessageListView(LoginRequiredMixin, ListView):
-    model = Message
-    template_name = 'messaging/message_list.html'
+@login_required
+def template_list_view(request):
+    templates = MessageTemplate.objects.filter(models.Q(created_by=request.user) | models.Q(created_by__is_superuser=True)).distinct().order_by('title')
+    return render(request, 'messaging/template_list.html', {'templates': templates})
 
-    def get_queryset(self):
-        if self.request.user.user_type == 'admin':
-            return Message.objects.all()
-        return Message.objects.filter(user=self.request.user)
+@login_required
+def campaign_list_view(request):
+    campaigns = Campaign.objects.filter(created_by=request.user).order_by('-created_at')
+    return render(request, 'messaging/campaign_list.html', {'campaigns': campaigns})
 
-class BulkMessageView(LoginRequiredMixin, FormView):
-    template_name = 'messaging/bulk_message_form.html'
-    form_class = None  # We will create this form next
-    success_url = reverse_lazy('bulk_message')
+@login_required
+@transaction.atomic
+def campaign_create_view(request):
+    if request.method == 'POST':
+        campaign_name = request.POST.get('campaign_name')
+        message_content = request.POST.get('message_content')
+        scheduled_at_str = request.POST.get('scheduled_at')
+        if not all([campaign_name, message_content]):
+            messages.error(request, "Campaign Name and Message Content are required.")
+            return redirect('messaging:campaign_create')
+        try:
+            recipients = _process_recipients(request)
+            if not recipients: raise ValueError("No valid recipients found. Please add contacts from at least one source.")
+        except ValueError as e:
+            messages.error(request, str(e)); return redirect('messaging:campaign_create')
 
-    def get_form_class(self):
-        from .forms import BulkMessageForm
-        return BulkMessageForm
+        campaign = Campaign.objects.create(name=campaign_name, message_content=message_content, created_by=request.user)
+        recipient_objects = [CampaignRecipient(campaign=campaign, phone_number=phone, contact=contact) for phone, contact in recipients.items()]
+        CampaignRecipient.objects.bulk_create(recipient_objects)
 
-    def form_valid(self, form):
-        from .tasks import send_scheduled_message
-        message_body = form.cleaned_data['message_body']
-        contacts_manual = form.cleaned_data['contacts_manual']
-        csv_file = form.cleaned_data['csv_file']
-        scheduled_at = form.cleaned_data['scheduled_at']
+        if scheduled_at_str:
+            try:
+                scheduled_at = timezone.datetime.strptime(scheduled_at_str, '%Y-%m-%dT%H:%M')
+                if timezone.is_naive(scheduled_at): scheduled_at = timezone.make_aware(scheduled_at)
+                if scheduled_at <= timezone.now(): raise ValueError("Scheduled time must be in the future.")
+                campaign.scheduled_at = scheduled_at
+                campaign.status = Campaign.Status.PENDING
+                send_campaign_messages.apply_async(args=[campaign.id], eta=scheduled_at)
+                messages.success(request, f"Campaign '{campaign.name}' scheduled for {scheduled_at.strftime('%b %d, %Y at %I:%M %p')}.")
+            except ValueError as e:
+                messages.error(request, str(e)); campaign.delete(); return redirect('messaging:campaign_create')
+        else:
+            campaign.status = Campaign.Status.IN_PROGRESS
+            campaign.started_at = timezone.now()
+            send_campaign_messages.delay(campaign.id)
+            messages.success(request, f"Campaign '{campaign.name}' has started immediately.")
+        campaign.save()
+        return redirect('messaging:campaign_list')
 
-        contacts = []
-        if contacts_manual:
-            for line in contacts_manual.splitlines():
-                parts = line.split(',')
-                if len(parts) == 2:
-                    name, phone_number = parts
-                    contacts.append({'name': name.strip(), 'phone_number': phone_number.strip()})
+    user_templates = MessageTemplate.objects.filter(models.Q(created_by=request.user) | models.Q(created_by__is_superuser=True)).distinct()
+    user_contacts = Contact.objects.filter(user=request.user)
+    templates_json = json.dumps({t.id: t.content for t in user_templates})
+    return render(request, 'messaging/campaign_form.html', {'templates': user_templates, 'contacts': user_contacts, 'templates_json': templates_json})
 
-        if csv_file:
-            csv_file.seek(0)
-            reader = csv.reader(TextIOWrapper(csv_file, encoding='utf-8'))
-            for row in reader:
-                if len(row) == 2:
-                    name, phone_number = row
-                    contacts.append({'name': name.strip(), 'phone_number': phone_number.strip()})
+def _process_recipients(request):
+    recipients = {}
+    contact_ids = request.POST.getlist('contacts')
+    if contact_ids:
+        for contact in Contact.objects.filter(id__in=contact_ids, user=request.user):
+            if phone := _normalize_phone(contact.phone): recipients[phone] = contact
+    manual_numbers = request.POST.get('manual_numbers', '')
+    if manual_numbers:
+        for number in manual_numbers.splitlines():
+            if number.strip() and (phone := _normalize_phone(number)) and phone not in recipients: recipients[phone] = None
+    csv_file = request.FILES.get('csv_file')
+    if csv_file:
+        if not csv_file.name.endswith('.csv'): raise ValueError("Please upload a valid CSV file.")
+        if csv_file.size > 5 * 1024 * 1024: raise ValueError("CSV file size exceeds 5MB.")
+        reader = csv.DictReader(io.StringIO(csv_file.read().decode('utf-8')))
+        phone_col = next((col for col in reader.fieldnames if 'phone' in col.lower()), None)
+        if not phone_col: raise ValueError("CSV must have a column named 'Phone' or 'Phone Number'.")
+        for row in reader:
+            if row.get(phone_col) and (phone := _normalize_phone(row[phone_col])) and phone not in recipients: recipients[phone] = None
+    return recipients
 
-        unique_contacts = {c['phone_number']: c for c in contacts}.values()
-
-        for contact_data in unique_contacts:
-            contact, created = Contact.objects.get_or_create(
-                phone_number=contact_data['phone_number'],
-                defaults={'name': contact_data['name'], 'user': self.request.user}
-            )
-            message = Message.objects.create(
-                user=self.request.user,
-                contact=contact,
-                message_body=message_body,
-                scheduled_at=scheduled_at,
-                status='scheduled' if scheduled_at else 'sent'
-            )
-            if scheduled_at:
-                send_scheduled_message.apply_async((message.id,), eta=scheduled_at)
-
-        return super().form_valid(form)
-
-class TemplateCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
-    model = Template
-    fields = ['name', 'body']
-    template_name = 'messaging/template_form.html'
-    success_url = reverse_lazy('template_list')
-
-    def test_func(self):
-        return self.request.user.user_type == 'admin'
-
-    def form_valid(self, form):
-        form.instance.created_by = self.request.user
-        return super().form_valid(form)
-
-class TemplateUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
-    model = Template
-    fields = ['name', 'body']
-    template_name = 'messaging/template_form.html'
-    success_url = reverse_lazy('template_list')
-
-    def test_func(self):
-        return self.request.user.user_type == 'admin'
-
-class TemplateDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
-    model = Template
-    template_name = 'messaging/template_confirm_delete.html'
-    success_url = reverse_lazy('template_list')
-
-    def test_func(self):
-        return self.request.user.user_type == 'admin'
+def _normalize_phone(number):
+    number = re.sub(r'\D', '', str(number))
+    if len(number) == 10 and not number.startswith('92'): number = '92' + number
+    if len(number) == 12 and number.startswith('92'): return '+' + number
+    return None

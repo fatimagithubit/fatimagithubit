@@ -1,20 +1,17 @@
 from django.urls import path
-from .views import (
-    SignUpView,
-    TemplateListView,
-    TemplateCreateView,
-    TemplateUpdateView,
-    TemplateDeleteView,
-    BulkMessageView,
-    MessageListView,
-)
+from . import views
+
+app_name = 'messaging'
 
 urlpatterns = [
-    path('signup/', SignUpView.as_view(), name='signup'),
-    path('templates/', TemplateListView.as_view(), name='template_list'),
-    path('templates/create/', TemplateCreateView.as_view(), name='template_create'),
-    path('templates/<int:pk>/update/', TemplateUpdateView.as_view(), name='template_update'),
-    path('templates/<int:pk>/delete/', TemplateDeleteView.as_view(), name='template_delete'),
-    path('bulk-message/', BulkMessageView.as_view(), name='bulk_message'),
-    path('messages/', MessageListView.as_view(), name='message_list'),
+    # --- Main User-Facing Pages ---
+    path('connect/', views.whatsapp_connect_view, name='whatsapp_connect'),
+    path('templates/', views.template_list_view, name='template_list'),
+    path('campaigns/', views.campaign_list_view, name='campaign_list'),
+    path('campaigns/create/', views.campaign_create_view, name='campaign_create'),
+
+    # --- Internal API Endpoints for the Connection Page ---
+    path('api/whatsapp/start/', views.start_session_api, name='whatsapp_start_api'),
+    path('api/whatsapp/status/', views.status_api, name='whatsapp_status_api'),
+    path('api/whatsapp/disconnect/', views.disconnect_api, name='whatsapp_disconnect_api'),
 ]

@@ -1,0 +1,153 @@
+{% extends "accounts/base.html" %}
+{% load static %}
+
+{% block title %}WhatsApp Connection{% endblock %}
+
+{% block content %}
+<style>
+    /* Your styling is preserved */
+    .qr-container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 350px; background: #f9fafb; border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.07); margin-bottom: 2rem; }
+    .qr-image { padding: 1rem; background: #fff; border-radius: 1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.08); margin-top: 1.5rem; animation: fadeIn 0.5s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95);} to { opacity: 1; transform: scale(1);} }
+    .status-text { font-weight: 600; margin-top: 1rem; font-size: 1.2rem; }
+    .status-connected { color: #10B981; }
+    .status-qr-ready { color: #F59E0B; }
+    .status-disconnected { color: #EF4444; }
+    .status-initializing { color: #3B82F6; }
+    .status-error { color: #D91C1C; }
+    .btn { min-width: 160px; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 600; border-radius: 0.75rem; border: none; cursor: pointer; transition: background 0.2s; margin: 0 0.5rem; }
+    .btn-green { background: #10B981; color: #fff; }
+    .btn-green:hover:enabled { background: #059669; }
+    .btn-red { background: #EF4444; color: #fff; }
+    .btn-red:hover:enabled { background: #B91C1C; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .modal-hidden { display: none; }
+    .modal-overlay { position: fixed; inset: 0; background-color: rgba(0, 0, 0, 0.5); z-index: 50; display: flex; align-items: center; justify-content: center; }
+    .modal-content { background: white; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 28rem; }
+</style>
+
+<div class="max-w-3xl mx-auto mt-10 p-6 bg-white rounded-xl shadow-2xl">
+    <h1 class="text-3xl font-bold mb-6 text-gray-800 text-center">WhatsApp Connection</h1>
+    <p class="mb-4 text-gray-600 text-center">Connect your WhatsApp account to enable bulk messaging campaigns.</p>
+
+    <div id="connection-status" class="qr-container">
+        <!-- Status and QR Code will be rendered here by JavaScript -->
+    </div>
+
+    <div class="flex justify-center space-x-4 mt-2">
+        <button id="start-btn" class="btn btn-green" type="button">Start / Generate QR</button>
+        <button id="disconnect-btn" class="btn btn-red" type="button">Disconnect</button>
+    </div>
+</div>
+
+<div id="confirmation-modal" class="modal-overlay modal-hidden">
+    <div class="modal-content">
+        <h2 class="text-xl font-bold text-red-600 mb-4">Confirm Disconnect</h2>
+        <p class="text-gray-700 mb-6">Are you sure you want to disconnect? This will log out your WhatsApp session and require a new QR scan to reconnect.</p>
+        <div class="flex justify-end space-x-3">
+            <button id="modal-cancel-btn" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition duration-150">Cancel</button>
+            <button id="modal-confirm-btn" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-150">Disconnect Anyway</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const statusContainer = document.getElementById('connection-status');
+        const startBtn = document.getElementById('start-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const modal = document.getElementById('confirmation-modal');
+        const modalConfirmBtn = document.getElementById('modal-confirm-btn');
+        const modalCancelBtn = document.getElementById('modal-cancel-btn');
+
+        // **THIS IS THE FIX:** The hardcoded "/app" prefix has been removed.
+        // Django's `url` tag will now generate the correct full path, like `/app/api/whatsapp/start/`.
+        const startUrl = "{% url 'messaging:whatsapp_start_api' %}";
+        const statusUrl = "{% url 'messaging:whatsapp_status_api' %}";
+        const disconnectUrl = "{% url 'messaging:whatsapp_disconnect_api' %}";
+
+        let statusInterval;
+
+        function updateUI(state) {
+            let statusHtml = '';
+            startBtn.style.display = 'none';
+            disconnectBtn.style.display = 'none';
+            startBtn.disabled = false;
+            disconnectBtn.disabled = false;
+
+            switch(state.status) {
+                case 'CONNECTED':
+                    statusHtml = `<p class="status-text status-connected">Connected as <strong>${state.connection_info.name || 'Unknown'}</strong></p>`;
+                    disconnectBtn.style.display = 'inline-block';
+                    if (statusInterval) clearInterval(statusInterval);
+                    break;
+                case 'QR_READY':
+                    statusHtml = `<p class="status-text status-qr-ready">Scan the QR Code to Connect</p>`;
+                    if (state.qr) statusHtml += `<img src="data:image/png;base64,${state.qr}" alt="Scan QR Code" class="qr-image">`;
+                    disconnectBtn.style.display = 'inline-block';
+                    break;
+                case 'DISCONNECTED':
+                    statusHtml = `<p class="status-text status-disconnected">Session is disconnected.</p>`;
+                    startBtn.style.display = 'inline-block';
+                    if (statusInterval) clearInterval(statusInterval);
+                    break;
+                case 'ERROR':
+                    statusHtml = `<p class="status-text status-error">${state.message || 'An unknown error occurred.'}</p>`;
+                    startBtn.style.display = 'inline-block';
+                    if (statusInterval) clearInterval(statusInterval);
+                    break;
+                default:
+                    statusHtml = `<p class="status-text status-initializing">${state.message || 'Initializing...'}</p>`;
+                    startBtn.style.display = 'inline-block';
+                    startBtn.disabled = true;
+                    break;
+            }
+            statusContainer.innerHTML = statusHtml;
+        }
+
+        async function checkStatus() {
+            try {
+                const response = await fetch(statusUrl);
+                const data = await response.json();
+                updateUI(data);
+            } catch (error) {
+                updateUI({ status: 'ERROR', message: 'Error: Could not contact the server.' });
+            }
+        }
+
+        async function startSession() {
+            startBtn.disabled = true;
+            updateUI({ status: 'STARTING', message: 'Initializing session, please wait...' });
+            try {
+                await fetch(startUrl, { method: 'POST' });
+                if (statusInterval) clearInterval(statusInterval);
+                setTimeout(checkStatus, 2000);
+                statusInterval = setInterval(checkStatus, 5000);
+            } catch (error) {
+                updateUI({ status: 'ERROR', message: 'Failed to start the session.' });
+            }
+        }
+
+        async function disconnectSession() {
+            modal.classList.add('modal-hidden');
+            disconnectBtn.disabled = true;
+            updateUI({ status: 'STARTING', message: 'Disconnecting...' });
+            if (statusInterval) clearInterval(statusInterval);
+            try {
+                const response = await fetch(disconnectUrl, { method: 'POST' });
+                const data = await response.json();
+                updateUI({ status: 'DISCONNECTED', message: data.message || 'Successfully disconnected.' });
+            } catch (error) {
+                updateUI({ status: 'ERROR', message: 'Failed to disconnect.' });
+            }
+        }
+
+        disconnectBtn.addEventListener('click', () => { modal.classList.remove('modal-hidden'); });
+        modalCancelBtn.addEventListener('click', () => { modal.classList.add('modal-hidden'); });
+        modalConfirmBtn.addEventListener('click', disconnectSession);
+        startBtn.addEventListener('click', startSession);
+
+        checkStatus();
+    });
+</script>
+{% endblock %}
