@@ -7,7 +7,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth import get_user_model
 
 # Your other imports
-from .models import Contact, ContactUs
+from .models import Contact
 from .forms import UserProfileUpdateForm, ContactForm, CustomUserCreationForm
 from datetime import timedelta
 from django.utils import timezone

@@ -4,67 +4,79 @@
 
 {% block content %}
 <style>
-  .wa-card {
-    border-radius: 18px;
-    box-shadow: 0 4px 24px rgba(16,185,129,0.10);
-    background: #fff;
-    padding: 2.5rem 2rem;
-    margin-top: 48px;
-    max-width: 500px;
-    margin-left: auto;
-    margin-right: auto;
+  .login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 80vh;
   }
-  .wa-btn {
-    background: #25d366;
-    color: #fff;
+  .login-card {
+    border-radius: 1rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    background: var(--white);
+    padding: 2.5rem;
+    width: 100%;
+    max-width: 450px;
+  }
+  .login-header h3 {
+    color: var(--primary-green);
+    font-weight: 700;
+  }
+  .login-header .text-orange {
+    color: var(--primary-orange);
+  }
+  .btn-login {
+    background-color: var(--primary-green);
+    color: var(--white);
     border: none;
-    border-radius: 8px;
+    border-radius: 0.5rem;
     font-size: 1.1rem;
     font-weight: 500;
-    padding: 0.75rem 0;
+    padding: 0.75rem;
     transition: all 0.2s;
   }
-  .wa-btn:hover {
-    background: #128c7e;
-    transform: scale(1.02);
+  .btn-login:hover {
+    background-color: var(--dark-green);
+    transform: translateY(-2px);
   }
-  .wa-link { color: #128c7e; text-decoration: none; }
-  .wa-link:hover { text-decoration: underline; }
+  .register-link {
+    color: var(--primary-orange);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .register-link:hover {
+    text-decoration: underline;
+  }
 </style>
 
-<div class="container">
-    <div class="row justify-content-center">
-        <div class="col-12">
-            <div class="wa-card">
-                <div class="text-center mb-4">
-                    <img src="{% static 'image/WHATSBOTX.png' %}" alt="WhatsX Logo" style="height: 150px; width: auto;">
-                    <h3 class="mt-2 mb-0" style="color:#25d366; font-family:'Playfair Display',serif; font-weight:700;">Login to <span style="color:#ff9800;">WhatsX</span></h3>
-                </div>
+<div class="container login-container">
+    <div class="login-card">
+        <div class="text-center mb-4 login-header">
+            <img src="{% static 'image/WHATSBOTX.png' %}" alt="WhatsX Logo" style="height: 120px; width: auto;">
+            <h3 class="mt-3 mb-0">Login to <span class="text-orange">WhatsX</span></h3>
+        </div>
 
-                {% if form.errors %}
-                  <div class="alert alert-danger" role="alert">
-                      Invalid username or password. Please try again.
-                  </div>
-                {% endif %}
+        {% if form.errors %}
+          <div class="alert alert-danger" role="alert">
+              Invalid username or password. Please try again.
+          </div>
+        {% endif %}
 
-                <form method="post" action="{% url 'accounts:login_view' %}">
-                    {% csrf_token %}
-                    <div class="form-floating mb-3">
-                        {{ form.username }}
-                        <label for="{{ form.username.id_for_label }}">Username</label>
-                    </div>
-                    <div class="form-floating mb-3">
-                        {{ form.password }}
-                        <label for="{{ form.password.id_for_label }}">Password</label>
-                    </div>
-                    <button type="submit" class="wa-btn w-100">Login</button>
-                </form>
-
-                <div class="mt-4 text-center">
-                    {# **THE FIX IS HERE:** Added 'accounts:' to the register_view URL #}
-                    <a href="{% url 'accounts:register_view' %}" class="wa-link">Don't have an account? Register</a>
-                </div>
+        <form method="post" action="{% url 'accounts:login_view' %}">
+            {% csrf_token %}
+            <div class="form-floating mb-3">
+                {{ form.username }}
+                <label for="{{ form.username.id_for_label }}">Username</label>
             </div>
+            <div class="form-floating mb-3">
+                {{ form.password }}
+                <label for="{{ form.password.id_for_label }}">Password</label>
+            </div>
+            <button type="submit" class="btn-login w-100">Login</button>
+        </form>
+
+        <div class="mt-4 text-center">
+            <a href="{% url 'accounts:register_view' %}" class="register-link">Don't have an account? Register</a>
         </div>
     </div>
 </div>

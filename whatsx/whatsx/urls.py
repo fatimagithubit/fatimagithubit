@@ -9,6 +9,7 @@ urlpatterns = [
     # All application-related URLs will be prefixed with 'app/'
     # This is a clean and scalable way to organize your project.
     path('app/', include('messaging.urls', namespace='messaging')),
+    path('app/accounts/', include('accounts.urls', namespace='accounts')),
 
     # You can add a root redirect to the dashboard or another page later if needed
     # from django.views.generic import RedirectView
